@@ -392,6 +392,7 @@ def create_advanced_rfq_pdf(data):
             self.set_y(sy + sh)
             self.ln(3)
 
+    # ── _clean: sanitise all cell values, including unicode characters ────────
     def _clean(v):
         if v is None or str(v).strip().lower() in ("nan", "none", ""):
             return ""
@@ -399,7 +400,9 @@ def create_advanced_rfq_pdf(data):
             f = float(v)
             return str(int(f)) if f == int(f) else str(f)
         except Exception:
-            return str(v).strip()
+            # FIX: encode to latin-1, replacing any character outside the range
+            # (e.g. em-dash U+2013, curly quotes, bullet U+2022, etc.) with '?'
+            return str(v).strip().encode('latin-1', errors='replace').decode('latin-1')
 
     def _write_logo(pdf, logo_data, x, y, w, h):
         if not logo_data:
@@ -505,11 +508,6 @@ def create_advanced_rfq_pdf(data):
 
         draw_col_headers()
 
-        # ── Render rows ──────────────────────────────────────────────────────
-        # After _filter_model_details, the DataFrame is already flat:
-        # Sr.no & Category are set only on the first row of each group.
-        # We re-group here so we can still span the left cells vertically.
-
         rows_list = []
         for _, r in df.iterrows():
             rows_list.append({
@@ -520,7 +518,6 @@ def create_advanced_rfq_pdf(data):
                 "req":  _clean(r.get("Requirement", ""))
             })
 
-        # Re-group consecutive rows that share a (sr, cat) header
         groups = []
         if rows_list:
             curr = [rows_list[0]]
@@ -575,21 +572,11 @@ def create_advanced_rfq_pdf(data):
 
     # ── CUSTOM SPEC TABLE ─────────────────────────────────────────────────────
     def render_custom_spec_table(pdf, custom_tables):
-        """
-        Renders one or more user-defined spec tables in the PDF.
-
-        custom_tables: list of dicts, each with:
-            {
-              'title':   str,           # dark navy header text
-              'columns': [str, ...],    # user-defined column names (2-5)
-              'df':      pd.DataFrame,  # rows; columns match 'columns' list
-            }
-        """
         if not custom_tables:
             return
 
-        USABLE_W   = 190   # A4 usable width in mm (10mm margins each side)
-        SR_W       = 10    # fixed Sr.No column width
+        USABLE_W   = 190
+        SR_W       = 10
         header_fill = (220, 230, 241)
         rh_min      = 8
 
@@ -601,20 +588,16 @@ def create_advanced_rfq_pdf(data):
             if not user_cols or df is None or df.empty:
                 continue
 
-            # Drop rows where ALL user columns are blank
             def _row_has_data(row):
                 return any(not _is_blank(row.get(c, '')) for c in user_cols)
             df = df[df.apply(_row_has_data, axis=1)].reset_index(drop=True)
             if df.empty:
                 continue
 
-            # Build column list: Sr.No always first, then user columns
             all_cols = ['Sr.No'] + user_cols
             n_user   = len(user_cols)
 
-            # Distribute remaining width evenly across user columns
             remaining = USABLE_W - SR_W
-            # First user col gets slightly more (it's usually the label column)
             if n_user == 1:
                 col_widths = [remaining]
             elif n_user == 2:
@@ -623,14 +606,12 @@ def create_advanced_rfq_pdf(data):
                 col_widths = [round(remaining * 0.38), round(remaining * 0.32), round(remaining * 0.30)]
             elif n_user == 4:
                 col_widths = [round(remaining * 0.32), round(remaining * 0.25), round(remaining * 0.23), round(remaining * 0.20)]
-            else:  # 5
+            else:
                 col_widths = [round(remaining * 0.28), round(remaining * 0.20), round(remaining * 0.20), round(remaining * 0.17), round(remaining * 0.15)]
-            # Fix rounding so total = remaining
             col_widths[-1] += remaining - sum(col_widths)
             all_widths = [SR_W] + col_widths
             total_w    = sum(all_widths)
 
-            # ── Title bar ────────────────────────────────────────────────────
             if pdf.get_y() + 30 > pdf.page_break_trigger:
                 pdf.add_page()
 
@@ -645,13 +626,11 @@ def create_advanced_rfq_pdf(data):
             pdf.set_y(ty + 9)
             pdf.ln(1)
 
-            # ── Column header row ─────────────────────────────────────────────
             def draw_col_headers():
                 pdf.set_fill_color(*header_fill)
                 pdf.set_font('Arial', 'B', 9)
                 hy  = pdf.get_y()
                 hh  = 12
-                # Compute needed height across all headers
                 for i, c in enumerate(all_cols):
                     cpl = max(1, int(all_widths[i] / 2.0))
                     hh  = max(hh, -(-len(c) // cpl) * 5 + 4)
@@ -667,11 +646,9 @@ def create_advanced_rfq_pdf(data):
             draw_col_headers()
             pdf.set_font('Arial', '', 9)
 
-            # ── Data rows ─────────────────────────────────────────────────────
             for row_i, (_, row) in enumerate(df.iterrows()):
                 vals = [str(row_i + 1)] + [_clean(row.get(c, '')) for c in user_cols]
 
-                # Compute row height
                 row_h = rh_min
                 for j, val in enumerate(vals):
                     cpl   = max(1, int(all_widths[j] / 1.85))
@@ -1002,7 +979,6 @@ def create_advanced_rfq_pdf(data):
     wh_sub         = data.get('wh_sub', '')
     use_custom_spec = data.get('use_custom_spec', False)
 
-    # ── Custom table path (overrides standard spec tables) ───────────────────
     if use_custom_spec:
         render_custom_spec_table(pdf, data.get('custom_tables', []))
         render_layout_images(pdf, data.get('layout_images', []))
@@ -1430,17 +1406,8 @@ with st.expander("📦 Technical Specifications", expanded=True):
 
     # ══════════════════════════════════════════════════════════════════════════
     # CUSTOM SPEC TABLE UI
-    # User defines: table title, number of columns (2-5), column names, rows.
-    # Multiple tables supported — each with its own title/columns/rows.
     # ══════════════════════════════════════════════════════════════════════════
     def _render_custom_spec_editor(prefix):
-        """
-        Lets the user build one or more fully custom spec tables.
-        Each table has:
-          - An editable title (shown as the dark navy bar in the PDF)
-          - 2 to 5 user-named columns
-          - Dynamic rows filled in a data_editor
-        """
         st.markdown(
             "<div style='background:#2e7d32;color:white;font-weight:bold;"
             "padding:8px 12px;margin-bottom:8px;font-size:15px;border-radius:3px;'>"
@@ -1448,7 +1415,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
             unsafe_allow_html=True
         )
 
-        # ── How many tables? ──────────────────────────────────────────────────
         n_tables_key = f"custom_n_tables_{prefix}"
         if n_tables_key not in st.session_state:
             st.session_state[n_tables_key] = 1
@@ -1476,7 +1442,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
                 unsafe_allow_html=True
             )
 
-            # ── Table Title ───────────────────────────────────────────────────
             title_key = f"custom_title_{tbl_pfx}"
             if title_key not in st.session_state:
                 st.session_state[title_key] = "Technical Specification"
@@ -1487,7 +1452,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
                 placeholder="e.g. Model Details / Key Features / Dimensions",
             )
 
-            # ── Number of columns ─────────────────────────────────────────────
             ncols_key = f"custom_ncols_{tbl_pfx}"
             if ncols_key not in st.session_state:
                 st.session_state[ncols_key] = 3
@@ -1498,14 +1462,12 @@ with st.expander("📦 Technical Specifications", expanded=True):
                 value=st.session_state[ncols_key],
                 key=f"ncols_slider_{tbl_pfx}",
             )
-            # Detect column-count change and wipe frozen/data so editor rebuilds
             if n_cols != st.session_state[ncols_key]:
                 st.session_state[ncols_key] = n_cols
                 for k in [f"custom_frozen_{tbl_pfx}", f"custom_data_{tbl_pfx}"]:
                     st.session_state.pop(k, None)
                 st.rerun()
 
-            # ── Column name inputs ────────────────────────────────────────────
             col_name_keys = [f"custom_colname_{tbl_pfx}_{i}" for i in range(n_cols)]
             default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes", "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
             label_cols = st.columns(n_cols)
@@ -1520,7 +1482,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
                     value=prev_name,
                     key=f"colname_input_{tbl_pfx}_{i}",
                 )
-                # If column name changed, wipe frozen so editor rebuilds with new headers
                 if new_name != prev_name:
                     st.session_state[ck] = new_name
                     for k in [f"custom_frozen_{tbl_pfx}", f"custom_data_{tbl_pfx}"]:
@@ -1528,7 +1489,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
                     st.rerun()
                 user_col_names.append(st.session_state[ck])
 
-            # ── Data Editor ───────────────────────────────────────────────────
             fkey = f"custom_frozen_{tbl_pfx}"
             dkey = f"custom_data_{tbl_pfx}"
             wkey = f"custom_widget_{tbl_pfx}"
@@ -1588,7 +1548,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
             pfx = {'Storage System': 'ss', 'Material Handling': 'mh', 'Dock Leveller': 'dl'}[wh_sub]
             st.markdown(f"#### 📋 {wh_sub} Specification")
 
-            # ── TABLE MODE TOGGLE ─────────────────────────────────────────────
             st.markdown("**Specification Table Mode:**")
             table_mode = st.radio(
                 "Choose how to define the Technical Specification:",
@@ -1617,7 +1576,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
         elif wh_sub == "Automated Storage System":
             st.markdown("#### 📋 Automated Storage System")
 
-            # ── TABLE MODE TOGGLE ─────────────────────────────────────────────
             st.markdown("**Specification Table Mode:**")
             table_mode = st.radio(
                 "Choose how to define the Technical Specification:",
@@ -1768,7 +1726,6 @@ with st.expander("📦 Technical Specifications", expanded=True):
             _render_layout_uploader("sc")
 
     else:
-        # ── Non-warehouse categories ──────────────────────────────────────────
         hints = CATEGORY_HINTS.get(rfq_category, [])
         if hints:
             st.markdown(f"**💡 Common items in *{rfq_category}*:**")
@@ -1915,19 +1872,10 @@ def _get_spec_df(prefix, section_name):
 
 
 def _get_custom_tables(prefix):
-    """
-    Reconstruct the list of custom tables for PDF generation.
-    For each table index 0..n_tables-1, reads:
-      - title  : from session_state custom_title_{prefix}_t{i}
-      - columns: from session_state custom_colname_{prefix}_t{i}_{j}  (j = 0..n_cols-1)
-      - df     : by applying widget delta onto frozen df
-    Returns a list of dicts: [{'title': str, 'columns': [...], 'df': DataFrame}, ...]
-    """
     n_tables = st.session_state.get(f"custom_n_tables_{prefix}", 1)
     result   = []
 
     def _apply_delta(frozen, delta, cols):
-        """Apply Streamlit EditingState delta onto a frozen DataFrame."""
         if frozen is None:
             return pd.DataFrame()
         df = frozen.copy()
@@ -1955,10 +1903,8 @@ def _get_custom_tables(prefix):
     for tbl_idx in range(n_tables):
         tbl_pfx = f"{prefix}_t{tbl_idx}"
 
-        # Title
         title = st.session_state.get(f"custom_title_{tbl_pfx}", "Technical Specification")
 
-        # Column names
         n_cols = st.session_state.get(f"custom_ncols_{tbl_pfx}", 3)
         default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes",
                          "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
@@ -1967,7 +1913,6 @@ def _get_custom_tables(prefix):
             ck = f"custom_colname_{tbl_pfx}_{j}"
             cols.append(st.session_state.get(ck, default_names[j] if j < len(default_names) else f"Col {j+1}"))
 
-        # DataFrame — apply delta over frozen, fall back to saved dkey
         fkey = f"custom_frozen_{tbl_pfx}"
         dkey = f"custom_data_{tbl_pfx}"
         wkey = f"custom_widget_{tbl_pfx}"
@@ -1977,7 +1922,6 @@ def _get_custom_tables(prefix):
         df_live = _apply_delta(frozen, delta, cols)
         df_saved = st.session_state.get(dkey)
 
-        # Use whichever has more data (handles both on_change and direct-generate paths)
         if _count_filled(df_live) >= _count_filled(df_saved):
             df_final = df_live
         else:
@@ -1997,7 +1941,6 @@ if submitted:
     current_wh_sub   = st.session_state.get('wh_sub_select', '') if st.session_state.get('rfq_category_select') == 'Warehouse Equipment' else ''
     is_wh = (current_category == "Warehouse Equipment")
 
-    # Determine if custom table mode is active
     pfx_map_mode = {
         "Storage System":           "ss",
         "Material Handling":        "mh",
@@ -2073,7 +2016,6 @@ if submitted:
         layout_key = f"layout_images_{pfx_map.get(current_wh_sub, 'ss')}"
         pdf_data_dict['layout_images'] = st.session_state.get(layout_key, [])
 
-        # Custom spec tables (overrides standard tables)
         if use_custom_spec:
             pdf_data_dict['custom_tables'] = _get_custom_tables(_mode_pfx)
 
