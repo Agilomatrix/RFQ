@@ -419,11 +419,9 @@ def create_advanced_rfq_pdf(data):
         pdf.set_text_color(0, 0, 0)
         pdf.ln(8)
 
-        # ── "Request for Quotation" title ─────────────────────────────────────
         pdf.set_font('Arial', 'B', 28)
         pdf.cell(0, 14, 'Request for Quotation', 0, 1, 'C')
 
-        # ── RFQ Number subtitle (editable, shown in italics below title) ──────
         rfq_no = data.get('rfq_no', '').strip()
         if rfq_no:
             pdf.set_font('Arial', 'I', 13)
@@ -567,6 +565,85 @@ def create_advanced_rfq_pdf(data):
             pdf.set_y(sy + group_h)
         pdf.ln(5)
 
+    # ── CONTENT BLOCK RENDERER (paragraph / bullets / numbering) ─────────────
+    def render_content_block(pdf, block):
+        """
+        Renders a text content block in the PDF.
+        block = {
+            'block_type': 'paragraph' | 'bullets' | 'numbering',
+            'title': str (optional heading above block),
+            'text': str  (the raw text; each line = one bullet/numbered item)
+        }
+        """
+        usable_w = pdf.w - pdf.l_margin - pdf.r_margin
+        block_type = block.get('block_type', 'paragraph')
+        title = _safe_text(block.get('title', '').strip())
+        text  = block.get('text', '').strip()
+
+        if not text:
+            return
+
+        if pdf.get_y() + 20 > pdf.page_break_trigger:
+            pdf.add_page()
+
+        # Optional section sub-title bar
+        if title:
+            pdf.set_fill_color(44, 82, 130)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font('Arial', 'B', 10)
+            bar_y = pdf.get_y()
+            pdf.rect(pdf.l_margin, bar_y, usable_w, 8, 'F')
+            pdf.set_xy(pdf.l_margin + 3, bar_y + 1.5)
+            pdf.cell(usable_w - 6, 5, title, border=0)
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_y(bar_y + 8)
+            pdf.ln(2)
+
+        if block_type == 'paragraph':
+            paragraphs = _prepare_purpose_text(text)
+            if not paragraphs:
+                paragraphs = [_safe_text(text)]
+            pdf.set_font('Arial', '', 10)
+            for para in paragraphs:
+                if pdf.get_y() + 10 > pdf.page_break_trigger:
+                    pdf.add_page()
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(usable_w, 6, para, border=0, align='L')
+                pdf.ln(2)
+
+        elif block_type == 'bullets':
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            pdf.set_font('Arial', '', 10)
+            bullet = _safe_text(u'\u2022')  # bullet char, latin-1 safe fallback
+            for line in lines:
+                if pdf.get_y() + 8 > pdf.page_break_trigger:
+                    pdf.add_page()
+                safe_line = _safe_text(line)
+                # Draw bullet symbol
+                pdf.set_x(pdf.l_margin + 2)
+                pdf.cell(5, 6, '-', align='L')
+                pdf.set_xy(pdf.l_margin + 7, pdf.get_y())
+                start_y = pdf.get_y()
+                pdf.multi_cell(usable_w - 7, 6, safe_line, border=0, align='L')
+                pdf.ln(1)
+
+        elif block_type == 'numbering':
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            pdf.set_font('Arial', '', 10)
+            for i, line in enumerate(lines, 1):
+                if pdf.get_y() + 8 > pdf.page_break_trigger:
+                    pdf.add_page()
+                safe_line = _safe_text(line)
+                num_txt = f'{i}.'
+                num_w = pdf.get_string_width('99.') + 3
+                pdf.set_x(pdf.l_margin + 2)
+                pdf.cell(num_w, 6, num_txt, align='L')
+                pdf.set_xy(pdf.l_margin + 2 + num_w, pdf.get_y())
+                pdf.multi_cell(usable_w - num_w - 2, 6, safe_line, border=0, align='L')
+                pdf.ln(1)
+
+        pdf.ln(3)
+
     # ── CUSTOM SPEC TABLE ─────────────────────────────────────────────────────
     def render_custom_spec_table(pdf, custom_tables):
         if not custom_tables:
@@ -578,6 +655,14 @@ def create_advanced_rfq_pdf(data):
         rh_min      = 8
 
         for tbl in custom_tables:
+            block_type = tbl.get('block_type', 'table')
+
+            # ── Content block (paragraph / bullets / numbering) ──────────────
+            if block_type in ('paragraph', 'bullets', 'numbering'):
+                render_content_block(pdf, tbl)
+                continue
+
+            # ── Table block ───────────────────────────────────────────────────
             title    = _safe_text(tbl.get('title', 'Technical Specification'))
             user_cols = tbl.get('columns', [])
             df        = tbl.get('df', pd.DataFrame())
@@ -1224,14 +1309,13 @@ with st.expander("Step 2: Add Cover Page Details", expanded=True):
     company_name = st.text_input("Requester Company Name *", help="e.g., Pinnacle Mobility Solutions Pvt. Ltd")
     company_address = st.text_input("Requester Company Address *", help="e.g., Nanekarwadi, Chakan, Pune 410501")
 
-    # ── NEW: RFQ Number field ─────────────────────────────────────────────────
     st.markdown("---")
     rfq_col1, rfq_col2 = st.columns([2, 3])
     with rfq_col1:
         rfq_no = st.text_input(
             "RFQ Number *",
             value="RF0001",
-            help="Shown on the cover page (e.g. RFQ No.: RF0001) and in the footer of every page.",
+            help="Shown on the cover page and in the footer of every page.",
             placeholder="e.g. RF0001 or RFQ-2024-001"
         )
     with rfq_col2:
@@ -1415,139 +1499,296 @@ with st.expander("📦 Technical Specifications", expanded=True):
             st.info("Upload at least 1 layout image to include the Layout section in the PDF.")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # CUSTOM SPEC TABLE UI
+    # CUSTOM SPEC EDITOR — now supports Table, Paragraph, Bullets, Numbering
     # ══════════════════════════════════════════════════════════════════════════
     def _render_custom_spec_editor(prefix):
         st.markdown(
             "<div style='background:#2e7d32;color:white;font-weight:bold;"
             "padding:8px 12px;margin-bottom:8px;font-size:15px;border-radius:3px;'>"
-            "✏️ Create Your Own Specification Table(s)</div>",
+            "✏️ Build Your Own Specification — Add Tables & Text Blocks</div>",
             unsafe_allow_html=True
         )
 
-        n_tables_key = f"custom_n_tables_{prefix}"
-        if n_tables_key not in st.session_state:
-            st.session_state[n_tables_key] = 1
+        # ── Block type legend ─────────────────────────────────────────────────
+        st.markdown(
+            """
+            <div style="background:#f0f4f8;border-left:4px solid #2e7d32;padding:10px 14px;
+                        border-radius:4px;margin-bottom:12px;font-size:13px;line-height:1.7;">
+            <b>Block types you can add:</b><br>
+            📋 <b>Table</b> — define columns & fill rows (data grid)<br>
+            📝 <b>Paragraph</b> — free-form text; separate paragraphs with a blank line<br>
+            • <b>Bullet List</b> — one item per line, rendered with bullet points<br>
+            1. <b>Numbered List</b> — one item per line, rendered with auto-numbering
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        n_blocks_key = f"custom_n_blocks_{prefix}"
+        if n_blocks_key not in st.session_state:
+            st.session_state[n_blocks_key] = 1
 
         col_add, col_remove, _ = st.columns([1, 1, 6])
         with col_add:
-            if st.button("➕ Add Table", key=f"add_tbl_{prefix}"):
-                st.session_state[n_tables_key] = min(10, st.session_state[n_tables_key] + 1)
+            if st.button("➕ Add Block", key=f"add_blk_{prefix}"):
+                st.session_state[n_blocks_key] = min(20, st.session_state[n_blocks_key] + 1)
                 st.rerun()
         with col_remove:
-            if st.session_state[n_tables_key] > 1:
-                if st.button("➖ Remove Last", key=f"rem_tbl_{prefix}"):
-                    st.session_state[n_tables_key] -= 1
+            if st.session_state[n_blocks_key] > 1:
+                if st.button("➖ Remove Last", key=f"rem_blk_{prefix}"):
+                    st.session_state[n_blocks_key] -= 1
                     st.rerun()
 
-        n_tables = st.session_state[n_tables_key]
+        n_blocks = st.session_state[n_blocks_key]
 
-        for tbl_idx in range(n_tables):
-            tbl_pfx = f"{prefix}_t{tbl_idx}"
+        BLOCK_TYPE_OPTIONS = {
+            "📋 Table":          "table",
+            "📝 Paragraph":      "paragraph",
+            "•  Bullet List":    "bullets",
+            "1. Numbered List":  "numbering",
+        }
+        BLOCK_LABEL_TO_TYPE = {k: v for k, v in BLOCK_TYPE_OPTIONS.items()}
+        BLOCK_TYPE_TO_LABEL = {v: k for k, v in BLOCK_TYPE_OPTIONS.items()}
+
+        for blk_idx in range(n_blocks):
+            blk_pfx = f"{prefix}_b{blk_idx}"
+
+            # Colour-code header by type
+            btype_key = f"custom_btype_{blk_pfx}"
+            if btype_key not in st.session_state:
+                st.session_state[btype_key] = "table"
+            current_type = st.session_state[btype_key]
+
+            HEADER_COLORS = {
+                "table":     "#37474f",
+                "paragraph": "#4a235a",
+                "bullets":   "#1a4a7c",
+                "numbering": "#7c3a00",
+            }
+            HEADER_ICONS = {
+                "table": "📋", "paragraph": "📝",
+                "bullets": "•", "numbering": "1.",
+            }
+            hcolor = HEADER_COLORS.get(current_type, "#37474f")
+            hicon  = HEADER_ICONS.get(current_type, "")
 
             st.markdown(
-                f"<div style='background:#37474f;color:white;font-weight:bold;"
-                f"padding:5px 10px;margin-top:16px;margin-bottom:6px;"
-                f"font-size:13px;border-radius:3px;'>Table {tbl_idx + 1}</div>",
+                f"<div style='background:{hcolor};color:white;font-weight:bold;"
+                f"padding:6px 12px;margin-top:18px;margin-bottom:4px;"
+                f"font-size:13px;border-radius:4px;'>"
+                f"{hicon} Block {blk_idx + 1}</div>",
                 unsafe_allow_html=True
             )
 
-            title_key = f"custom_title_{tbl_pfx}"
-            if title_key not in st.session_state:
-                st.session_state[title_key] = "Technical Specification"
-            st.session_state[title_key] = st.text_input(
-                "Table Title (shown as header in PDF)",
-                value=st.session_state[title_key],
-                key=f"title_input_{tbl_pfx}",
-                placeholder="e.g. Model Details / Key Features / Dimensions",
+            # Block-type selector
+            current_label = BLOCK_TYPE_TO_LABEL.get(current_type, "📋 Table")
+            chosen_label  = st.radio(
+                "Block type",
+                options=list(BLOCK_TYPE_OPTIONS.keys()),
+                index=list(BLOCK_TYPE_OPTIONS.keys()).index(current_label),
+                key=f"btype_radio_{blk_pfx}",
+                horizontal=True,
+                label_visibility="collapsed",
             )
-
-            ncols_key = f"custom_ncols_{tbl_pfx}"
-            if ncols_key not in st.session_state:
-                st.session_state[ncols_key] = 3
-
-            n_cols = st.slider(
-                "Number of columns",
-                min_value=2, max_value=10,
-                value=st.session_state[ncols_key],
-                key=f"ncols_slider_{tbl_pfx}",
-            )
-            if n_cols != st.session_state[ncols_key]:
-                st.session_state[ncols_key] = n_cols
-                for k in [f"custom_frozen_{tbl_pfx}", f"custom_data_{tbl_pfx}"]:
-                    st.session_state.pop(k, None)
+            new_type = BLOCK_LABEL_TO_TYPE[chosen_label]
+            if new_type != st.session_state[btype_key]:
+                st.session_state[btype_key] = new_type
                 st.rerun()
 
-            col_name_keys = [f"custom_colname_{tbl_pfx}_{i}" for i in range(n_cols)]
-            default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes", "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
-            label_cols = st.columns(n_cols)
-            user_col_names = []
-            for i, lc in enumerate(label_cols):
-                ck = col_name_keys[i]
-                if ck not in st.session_state:
-                    st.session_state[ck] = default_names[i] if i < len(default_names) else f"Col {i+1}"
-                prev_name = st.session_state[ck]
-                new_name = lc.text_input(
-                    f"Column {i+1} name",
-                    value=prev_name,
-                    key=f"colname_input_{tbl_pfx}_{i}",
+            # ── TABLE block ───────────────────────────────────────────────────
+            if current_type == "table":
+                title_key = f"custom_title_{blk_pfx}"
+                if title_key not in st.session_state:
+                    st.session_state[title_key] = "Technical Specification"
+                st.session_state[title_key] = st.text_input(
+                    "Table title (shown as section header in PDF)",
+                    value=st.session_state[title_key],
+                    key=f"title_input_{blk_pfx}",
+                    placeholder="e.g. Model Details / Key Features / Dimensions",
                 )
-                if new_name != prev_name:
-                    st.session_state[ck] = new_name
-                    for k in [f"custom_frozen_{tbl_pfx}", f"custom_data_{tbl_pfx}"]:
+
+                ncols_key = f"custom_ncols_{blk_pfx}"
+                if ncols_key not in st.session_state:
+                    st.session_state[ncols_key] = 3
+
+                n_cols = st.slider(
+                    "Number of columns",
+                    min_value=2, max_value=10,
+                    value=st.session_state[ncols_key],
+                    key=f"ncols_slider_{blk_pfx}",
+                )
+                if n_cols != st.session_state[ncols_key]:
+                    st.session_state[ncols_key] = n_cols
+                    for k in [f"custom_frozen_{blk_pfx}", f"custom_data_{blk_pfx}"]:
                         st.session_state.pop(k, None)
                     st.rerun()
-                user_col_names.append(st.session_state[ck])
 
-            fkey = f"custom_frozen_{tbl_pfx}"
-            dkey = f"custom_data_{tbl_pfx}"
-            wkey = f"custom_widget_{tbl_pfx}"
+                col_name_keys = [f"custom_colname_{blk_pfx}_{i}" for i in range(n_cols)]
+                default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes",
+                                 "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
+                label_cols = st.columns(n_cols)
+                user_col_names = []
+                for i, lc in enumerate(label_cols):
+                    ck = col_name_keys[i]
+                    if ck not in st.session_state:
+                        st.session_state[ck] = default_names[i] if i < len(default_names) else f"Col {i+1}"
+                    prev_name = st.session_state[ck]
+                    new_name = lc.text_input(
+                        f"Column {i+1} name",
+                        value=prev_name,
+                        key=f"colname_input_{blk_pfx}_{i}",
+                    )
+                    if new_name != prev_name:
+                        st.session_state[ck] = new_name
+                        for k in [f"custom_frozen_{blk_pfx}", f"custom_data_{blk_pfx}"]:
+                            st.session_state.pop(k, None)
+                        st.rerun()
+                    user_col_names.append(st.session_state[ck])
 
-            if fkey not in st.session_state:
-                init_df = pd.DataFrame([{c: "" for c in user_col_names}])
-                st.session_state[fkey] = init_df.copy()
-                st.session_state[dkey] = init_df.copy()
+                fkey = f"custom_frozen_{blk_pfx}"
+                dkey = f"custom_data_{blk_pfx}"
+                wkey = f"custom_widget_{blk_pfx}"
 
-            def _make_custom_cb(_wkey, _fkey, _dkey, _cols):
-                def _cb():
-                    delta  = st.session_state.get(_wkey)
-                    frozen = st.session_state.get(_fkey)
-                    if not isinstance(delta, dict) or frozen is None:
-                        return
-                    df = frozen.copy()
-                    for row_idx_str, changes in delta.get("edited_rows", {}).items():
-                        row_idx = int(row_idx_str)
-                        if row_idx < len(df):
-                            for col, val in changes.items():
-                                if col in df.columns:
-                                    df.at[row_idx, col] = val
-                    for new_row in delta.get("added_rows", []):
-                        row_data = {c: new_row.get(c, "") for c in df.columns}
-                        df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
-                    del_indices = sorted(delta.get("deleted_rows", []), reverse=True)
-                    for i in del_indices:
-                        if i < len(df):
-                            df = df.drop(df.index[i]).reset_index(drop=True)
-                    st.session_state[_dkey] = df
-                return _cb
+                if fkey not in st.session_state:
+                    init_df = pd.DataFrame([{c: "" for c in user_col_names}])
+                    st.session_state[fkey] = init_df.copy()
+                    st.session_state[dkey] = init_df.copy()
 
-            st.data_editor(
-                st.session_state[fkey],
-                num_rows="dynamic",
-                use_container_width=True,
-                column_config={c: st.column_config.TextColumn(c, width="medium")
-                               for c in user_col_names},
-                key=wkey,
-                on_change=_make_custom_cb(wkey, fkey, dkey, user_col_names),
-            )
+                def _make_custom_cb(_wkey, _fkey, _dkey, _cols):
+                    def _cb():
+                        delta  = st.session_state.get(_wkey)
+                        frozen = st.session_state.get(_fkey)
+                        if not isinstance(delta, dict) or frozen is None:
+                            return
+                        df = frozen.copy()
+                        for row_idx_str, changes in delta.get("edited_rows", {}).items():
+                            row_idx = int(row_idx_str)
+                            if row_idx < len(df):
+                                for col, val in changes.items():
+                                    if col in df.columns:
+                                        df.at[row_idx, col] = val
+                        for new_row in delta.get("added_rows", []):
+                            row_data = {c: new_row.get(c, "") for c in df.columns}
+                            df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
+                        del_indices = sorted(delta.get("deleted_rows", []), reverse=True)
+                        for i in del_indices:
+                            if i < len(df):
+                                df = df.drop(df.index[i]).reset_index(drop=True)
+                        st.session_state[_dkey] = df
+                    return _cb
 
-            current_df = st.session_state.get(dkey, pd.DataFrame())
-            if not current_df.empty:
-                def _has_any(row):
-                    return any(str(row.get(c, "")).strip() for c in user_col_names if c in row)
-                filled = sum(1 for _, r in current_df.iterrows() if _has_any(r))
-                if filled:
-                    st.success(f"✅ {filled} row(s) defined in Table {tbl_idx + 1}")
+                st.data_editor(
+                    st.session_state[fkey],
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={c: st.column_config.TextColumn(c, width="medium")
+                                   for c in user_col_names},
+                    key=wkey,
+                    on_change=_make_custom_cb(wkey, fkey, dkey, user_col_names),
+                )
+
+                current_df = st.session_state.get(dkey, pd.DataFrame())
+                if not current_df.empty:
+                    def _has_any(row):
+                        return any(str(row.get(c, "")).strip() for c in user_col_names if c in row)
+                    filled = sum(1 for _, r in current_df.iterrows() if _has_any(r))
+                    if filled:
+                        st.success(f"✅ {filled} row(s) in this table")
+
+            # ── TEXT block (paragraph / bullets / numbering) ──────────────────
+            else:
+                title_key = f"custom_text_title_{blk_pfx}"
+                text_key  = f"custom_text_body_{blk_pfx}"
+                if title_key not in st.session_state:
+                    st.session_state[title_key] = ""
+                if text_key not in st.session_state:
+                    st.session_state[text_key] = ""
+
+                type_labels = {
+                    "paragraph": "Paragraph",
+                    "bullets":   "Bullet List",
+                    "numbering": "Numbered List",
+                }
+                placeholders = {
+                    "paragraph": (
+                        "e.g. The vendor shall supply and install the complete system "
+                        "including all accessories as per the specifications mentioned herein.\n\n"
+                        "A second paragraph can be added by leaving a blank line between them."
+                    ),
+                    "bullets": (
+                        "e.g.\nPowder-coated MS steel construction\n"
+                        "Load capacity: 500 kg per tray\n"
+                        "CE certified\n"
+                        "Minimum 2-year onsite warranty"
+                    ),
+                    "numbering": (
+                        "e.g.\nVendor shall submit technical drawings within 7 days of PO.\n"
+                        "Factory acceptance test to be conducted before dispatch.\n"
+                        "Installation to be completed within 4 weeks of delivery.\n"
+                        "Operator training (min. 2 days) included in scope."
+                    ),
+                }
+
+                # Optional heading bar label
+                col_t, col_h = st.columns([2, 3])
+                with col_t:
+                    st.session_state[title_key] = st.text_input(
+                        f"{type_labels[current_type]} title / heading (optional)",
+                        value=st.session_state[title_key],
+                        key=f"text_title_input_{blk_pfx}",
+                        placeholder="e.g. Scope of Supply / General Conditions",
+                    )
+                with col_h:
+                    st.caption(
+                        "This heading will appear as a dark bar above the text in the PDF. "
+                        "Leave blank to render text without a header bar."
+                    )
+
+                # Main text area with contextual hint
+                if current_type == "paragraph":
+                    st.caption("💡 Type freely. Separate paragraphs with a **blank line**.")
+                elif current_type == "bullets":
+                    st.caption("💡 One bullet item per line. Each line → one bullet point (–) in the PDF.")
+                else:
+                    st.caption("💡 One item per line. Lines will be numbered 1, 2, 3… automatically in the PDF.")
+
+                st.session_state[text_key] = st.text_area(
+                    f"Content ({type_labels[current_type]})",
+                    value=st.session_state[text_key],
+                    height=160,
+                    key=f"text_body_input_{blk_pfx}",
+                    placeholder=placeholders.get(current_type, ""),
+                    label_visibility="collapsed",
+                )
+
+                body = st.session_state[text_key].strip()
+                if body:
+                    line_count = len([l for l in body.split('\n') if l.strip()])
+                    if current_type == "paragraph":
+                        para_count = len([p for p in body.split('\n\n') if p.strip()])
+                        st.success(f"✅ {para_count} paragraph(s) ready")
+                    else:
+                        st.success(f"✅ {line_count} item(s) ready")
+
+                # Live preview
+                with st.expander("👁️ Preview in PDF style", expanded=False):
+                    if body:
+                        if current_type == "paragraph":
+                            for para in body.split('\n\n'):
+                                if para.strip():
+                                    st.write(para.strip())
+                                    st.write("")
+                        elif current_type == "bullets":
+                            for line in body.split('\n'):
+                                if line.strip():
+                                    st.markdown(f"- {line.strip()}")
+                        else:
+                            for i, line in enumerate(body.split('\n'), 1):
+                                if line.strip():
+                                    st.markdown(f"{i}. {line.strip()}")
+                    else:
+                        st.caption("Nothing to preview yet.")
+
             st.markdown("---")
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -1561,13 +1802,13 @@ with st.expander("📦 Technical Specifications", expanded=True):
             st.markdown("**Specification Table Mode:**")
             table_mode = st.radio(
                 "Choose how to define the Technical Specification:",
-                options=["📋 Use Standard Spec Tables", "✏️ Create My Own Table"],
+                options=["📋 Use Standard Spec Tables", "✏️ Create My Own Blocks"],
                 index=0,
                 key=f"table_mode_{pfx}",
                 horizontal=True,
                 label_visibility="collapsed",
             )
-            use_custom = (table_mode == "✏️ Create My Own Table")
+            use_custom = (table_mode == "✏️ Create My Own Blocks")
 
             if use_custom:
                 _render_custom_spec_editor(pfx)
@@ -1589,13 +1830,13 @@ with st.expander("📦 Technical Specifications", expanded=True):
             st.markdown("**Specification Table Mode:**")
             table_mode = st.radio(
                 "Choose how to define the Technical Specification:",
-                options=["📋 Use Standard Spec Tables", "✏️ Create My Own Table"],
+                options=["📋 Use Standard Spec Tables", "✏️ Create My Own Blocks"],
                 index=0,
                 key="table_mode_carousel",
                 horizontal=True,
                 label_visibility="collapsed",
             )
-            use_custom = (table_mode == "✏️ Create My Own Table")
+            use_custom = (table_mode == "✏️ Create My Own Blocks")
 
             item_opts = [""] + ["Vertical Carousel System", "Horizontal Carousel System"]
             if 'wh_items_df' not in st.session_state:
@@ -1882,7 +2123,11 @@ def _get_spec_df(prefix, section_name):
 
 
 def _get_custom_tables(prefix):
-    n_tables = st.session_state.get(f"custom_n_tables_{prefix}", 1)
+    """
+    Collects all content blocks (tables + text blocks) for the given prefix.
+    Returns a list of block dicts ordered by block index.
+    """
+    n_blocks = st.session_state.get(f"custom_n_blocks_{prefix}", 1)
     result   = []
 
     def _apply_delta(frozen, delta, cols):
@@ -1910,38 +2155,50 @@ def _get_custom_tables(prefix):
         if d is None or not isinstance(d, pd.DataFrame): return 0
         return int(d.astype(str).apply(lambda c: c.str.strip()).ne('').sum().sum())
 
-    for tbl_idx in range(n_tables):
-        tbl_pfx = f"{prefix}_t{tbl_idx}"
+    for blk_idx in range(n_blocks):
+        blk_pfx    = f"{prefix}_b{blk_idx}"
+        block_type = st.session_state.get(f"custom_btype_{blk_pfx}", "table")
 
-        title = st.session_state.get(f"custom_title_{tbl_pfx}", "Technical Specification")
+        if block_type == "table":
+            title  = st.session_state.get(f"custom_title_{blk_pfx}", "Technical Specification")
+            n_cols = st.session_state.get(f"custom_ncols_{blk_pfx}", 3)
+            default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes",
+                             "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
+            cols = []
+            for j in range(n_cols):
+                ck = f"custom_colname_{blk_pfx}_{j}"
+                cols.append(st.session_state.get(ck, default_names[j] if j < len(default_names) else f"Col {j+1}"))
 
-        n_cols = st.session_state.get(f"custom_ncols_{tbl_pfx}", 3)
-        default_names = ["Parameter", "Value", "Unit", "Remarks", "Notes",
-                         "Col 6", "Col 7", "Col 8", "Col 9", "Col 10"]
-        cols = []
-        for j in range(n_cols):
-            ck = f"custom_colname_{tbl_pfx}_{j}"
-            cols.append(st.session_state.get(ck, default_names[j] if j < len(default_names) else f"Col {j+1}"))
+            fkey = f"custom_frozen_{blk_pfx}"
+            dkey = f"custom_data_{blk_pfx}"
+            wkey = f"custom_widget_{blk_pfx}"
 
-        fkey = f"custom_frozen_{tbl_pfx}"
-        dkey = f"custom_data_{tbl_pfx}"
-        wkey = f"custom_widget_{tbl_pfx}"
+            frozen   = st.session_state.get(fkey)
+            delta    = st.session_state.get(wkey)
+            df_live  = _apply_delta(frozen, delta, cols)
+            df_saved = st.session_state.get(dkey)
 
-        frozen  = st.session_state.get(fkey)
-        delta   = st.session_state.get(wkey)
-        df_live = _apply_delta(frozen, delta, cols)
-        df_saved = st.session_state.get(dkey)
+            if _count_filled(df_live) >= _count_filled(df_saved):
+                df_final = df_live
+            else:
+                df_final = df_saved if isinstance(df_saved, pd.DataFrame) else pd.DataFrame()
 
-        if _count_filled(df_live) >= _count_filled(df_saved):
-            df_final = df_live
+            result.append({
+                'block_type': 'table',
+                'title':      title,
+                'columns':    cols,
+                'df':         df_final,
+            })
+
         else:
-            df_final = df_saved if isinstance(df_saved, pd.DataFrame) else pd.DataFrame()
-
-        result.append({
-            'title':   title,
-            'columns': cols,
-            'df':      df_final,
-        })
+            # text block
+            title = st.session_state.get(f"custom_text_title_{blk_pfx}", "")
+            text  = st.session_state.get(f"custom_text_body_{blk_pfx}", "")
+            result.append({
+                'block_type': block_type,   # 'paragraph' | 'bullets' | 'numbering'
+                'title':      title,
+                'text':       text,
+            })
 
     return result
 
@@ -1961,7 +2218,7 @@ if submitted:
     _table_mode_key = f"table_mode_{_mode_pfx}" if current_wh_sub in pfx_map_mode else None
     use_custom_spec = False
     if _table_mode_key:
-        use_custom_spec = (st.session_state.get(_table_mode_key, "") == "✏️ Create My Own Table")
+        use_custom_spec = (st.session_state.get(_table_mode_key, "") == "✏️ Create My Own Blocks")
 
     errors = []
     if not Type_of_items.strip():     errors.append("Type of Items")
@@ -1994,7 +2251,7 @@ if submitted:
         'Storage':        Storage,
         'company_name':   company_name,
         'company_address': company_address,
-        'rfq_no':         rfq_no,          # ← NEW: RFQ Number
+        'rfq_no':         rfq_no,
         'footer_company_name':    footer_company_name,
         'footer_company_address': footer_company_address,
         'logo1_data': logo1_file.getvalue() if logo1_file else None,
