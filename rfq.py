@@ -209,16 +209,9 @@ def _is_blank(v):
 
 
 def _filter_model_details(df):
-    """
-    FIX: Only keep rows that have a non-empty Requirement value.
-    For groups (rows sharing a Sr.no / Category header), we carry the Sr.no
-    and Category forward ONLY onto the first kept row in each group, so the
-    PDF still shows the group label — but empty-requirement rows are dropped.
-    """
     if df is None or df.empty:
         return df
 
-    # ── Step 1: build a flat list with group membership ──────────────────────
     rows_list = []
     current_sr  = ""
     current_cat = ""
@@ -229,7 +222,6 @@ def _filter_model_details(df):
         desc = str(r.get("Description", "")).strip()
         unit = str(r.get("UNIT", r.get("Unit", ""))).strip()
 
-        # A new group starts when Sr.no or Category is non-empty
         if sr != "" or cat != "":
             current_sr  = sr
             current_cat = cat
@@ -242,14 +234,11 @@ def _filter_model_details(df):
             "req":  req,
         })
 
-    # ── Step 2: keep only rows where Requirement is filled ───────────────────
     kept = [r for r in rows_list if not _is_blank(r["req"])]
 
     if not kept:
-        return pd.DataFrame()   # nothing to show
+        return pd.DataFrame()
 
-    # ── Step 3: for each group that has kept rows, show Sr.no & Category only
-    #            on the FIRST kept row of that group ──────────────────────────
     seen_groups = set()
     result_rows = []
     for r in kept:
@@ -357,8 +346,16 @@ def create_advanced_rfq_pdf(data):
             self.set_draw_color(0, 0, 0)
             self.ln(1)
 
+            # ── RFQ No. (left) and APL-Confidential (right) on same line ──
+            rfq_no = self._data.get('rfq_no', '')
             self.set_font('Arial', 'B', 9)
             self.set_text_color(80, 80, 80)
+            # Left: RFQ No.
+            if rfq_no:
+                self.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
+                self.set_y(self.get_y())  # stay on same line
+                self.set_x(self.l_margin)
+            # Right: APL-Confidential
             self.cell(0, 5, 'APL-Confidential', 0, 1, 'R')
             self.ln(1)
 
@@ -392,7 +389,7 @@ def create_advanced_rfq_pdf(data):
             self.set_y(sy + sh)
             self.ln(3)
 
-    # ── _clean: sanitise all cell values, including unicode characters ────────
+    # ── _clean: sanitise all cell values ─────────────────────────────────────
     def _clean(v):
         if v is None or str(v).strip().lower() in ("nan", "none", ""):
             return ""
@@ -400,8 +397,6 @@ def create_advanced_rfq_pdf(data):
             f = float(v)
             return str(int(f)) if f == int(f) else str(f)
         except Exception:
-            # FIX: encode to latin-1, replacing any character outside the range
-            # (e.g. em-dash U+2013, curly quotes, bullet U+2022, etc.) with '?'
             return str(v).strip().encode('latin-1', errors='replace').decode('latin-1')
 
     def _write_logo(pdf, logo_data, x, y, w, h):
@@ -432,9 +427,19 @@ def create_advanced_rfq_pdf(data):
         pdf.set_text_color(0, 0, 0)
         pdf.ln(8)
 
+        # ── "Request for Quotation" title ─────────────────────────────────────
         pdf.set_font('Arial', 'B', 28)
         pdf.cell(0, 14, 'Request for Quotation', 0, 1, 'C')
+
+        # ── RFQ Number subtitle (editable, shown in italics below title) ──────
+        rfq_no = data.get('rfq_no', '').strip()
+        if rfq_no:
+            pdf.set_font('Arial', 'I', 13)
+            pdf.set_text_color(80, 80, 80)
+            pdf.cell(0, 7, f'(RFQ No.: {rfq_no})', 0, 1, 'C')
+            pdf.set_text_color(0, 0, 0)
         pdf.ln(4)
+
         pdf.set_font('Arial', 'I', 16)
         pdf.cell(0, 8, 'for', 0, 1, 'C')
         pdf.ln(4)
@@ -452,6 +457,31 @@ def create_advanced_rfq_pdf(data):
         pdf.ln(2)
         pdf.set_font('Arial', '', 14)
         pdf.cell(0, 8, data.get('company_address', ''), 0, 1, 'C')
+
+        # ── RFQ No. in cover page footer area ─────────────────────────────────
+        if rfq_no:
+            pdf.set_y(-45)
+            pdf.set_draw_color(180, 180, 180)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+            pdf.set_draw_color(0, 0, 0)
+            pdf.ln(2)
+            pdf.set_font('Arial', 'B', 9)
+            pdf.set_text_color(80, 80, 80)
+            pdf.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
+            pdf.cell(0, 5, 'APL-Confidential', 0, 1, 'R')
+            pdf.ln(1)
+            fn = data.get('footer_company_name', 'Agilomatrix Private Ltd')
+            pdf.set_font('Arial', 'B', 13)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 6, fn, 0, 1, 'C')
+            fa = data.get('footer_company_address',
+                          'Registered Office: F1403, 7 Plumeria Drive, 7PD Street, Tathawade, Pune - 411033')
+            pdf.set_font('Arial', '', 8)
+            pdf.set_text_color(120, 120, 120)
+            pdf.cell(0, 5, fa, 0, 1, 'C')
+            pdf.set_font('Arial', '', 8)
+            pdf.cell(0, 5, 'Page 1/{nb}', 0, 0, 'C')
+            pdf.set_text_color(0, 0, 0)
 
     # ── MODEL DETAILS TABLE ───────────────────────────────────────────────────
     def render_model_details(pdf, df, subtitle=""):
@@ -1227,6 +1257,19 @@ with st.expander("Step 2: Add Cover Page Details", expanded=True):
     company_name = st.text_input("Requester Company Name *", help="e.g., Pinnacle Mobility Solutions Pvt. Ltd")
     company_address = st.text_input("Requester Company Address *", help="e.g., Nanekarwadi, Chakan, Pune 410501")
 
+    # ── NEW: RFQ Number field ─────────────────────────────────────────────────
+    st.markdown("---")
+    rfq_col1, rfq_col2 = st.columns([2, 3])
+    with rfq_col1:
+        rfq_no = st.text_input(
+            "RFQ Number *",
+            value="RF0001",
+            help="Shown on the cover page (e.g. RFQ No.: RF0001) and in the footer of every page.",
+            placeholder="e.g. RF0001 or RFQ-2024-001"
+        )
+    with rfq_col2:
+        st.info(f"📄 This will appear as **'(RFQ No.: {rfq_no})'** on the cover page and **'RFQ No.: {rfq_no}'** in the footer of every page.")
+
 # Step 3: Footer
 with st.expander("Step 3: Add Footer Details (Optional)", expanded=False):
     footer_company_name = st.text_input("Footer Company Name")
@@ -1958,6 +2001,7 @@ if submitted:
     if not Storage.strip():           errors.append("Storage Type")
     if not company_name.strip():      errors.append("Company Name")
     if not company_address.strip():   errors.append("Company Address")
+    if not rfq_no.strip():            errors.append("RFQ Number")
     if not purpose.strip():           errors.append("Purpose of Requirement")
     if not spoc1_name.strip():        errors.append("SPOC Primary Name")
     if not spoc1_phone.strip():       errors.append("SPOC Primary Phone")
@@ -1983,6 +2027,7 @@ if submitted:
         'Storage':        Storage,
         'company_name':   company_name,
         'company_address': company_address,
+        'rfq_no':         rfq_no,          # ← NEW: RFQ Number
         'footer_company_name':    footer_company_name,
         'footer_company_address': footer_company_address,
         'logo1_data': logo1_file.getvalue() if logo1_file else None,
@@ -2084,7 +2129,7 @@ if submitted:
         try:
             pdf_bytes = create_advanced_rfq_pdf(pdf_data_dict)
             st.success("✅ RFQ PDF Generated Successfully!")
-            fname = f"RFQ_{Type_of_items.replace(' ', '_')}_{date.today().strftime('%Y%m%d')}.pdf"
+            fname = f"RFQ_{rfq_no}_{Type_of_items.replace(' ', '_')}_{date.today().strftime('%Y%m%d')}.pdf"
             st.download_button(
                 "📥 Download RFQ Document",
                 data=pdf_bytes, file_name=fname,
