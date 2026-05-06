@@ -462,7 +462,7 @@ def create_advanced_rfq_pdf(data):
 
         # ── RFQ No. in cover page footer area ─────────────────────────────────
         if rfq_no:
-            pdf.set_y(-30)
+            pdf.set_y(-38)
             pdf.set_draw_color(180, 180, 180)
             pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
             pdf.set_draw_color(0, 0, 0)
