@@ -340,6 +340,8 @@ def create_advanced_rfq_pdf(data):
             self.ln(3)
 
         def footer(self):
+            if self.page_no() == 1:
+                return
             self.set_y(-30)
             self.set_draw_color(180, 180, 180)
             self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
