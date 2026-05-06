@@ -340,42 +340,32 @@ def create_advanced_rfq_pdf(data):
             self.ln(3)
 
         def footer(self):
-            if self.page_no() == 1:
-                return
             self.set_y(-38)
             self.set_draw_color(180, 180, 180)
             self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
             self.set_draw_color(0, 0, 0)
             self.ln(1)
-
-            # ── RFQ No. (left) and APL-Confidential (right) on same line ──
+            
             rfq_no = self._data.get('rfq_no', '')
             self.set_font('Arial', 'B', 9)
             self.set_text_color(80, 80, 80)
-            # Left: RFQ No.
             if rfq_no:
                 self.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
-                self.set_y(self.get_y())  # stay on same line
-                self.set_x(self.l_margin)
-            # Right: APL-Confidential
             self.cell(0, 5, 'APL-Confidential', 0, 1, 'R')
             self.ln(1)
-
             fn = self._data.get('footer_company_name', 'Agilomatrix Private Ltd')
             self.set_font('Arial', 'B', 13)
             self.set_text_color(0, 0, 0)
             self.cell(0, 6, fn, 0, 1, 'C')
-
             fa = self._data.get('footer_company_address',
                                 'Registered Office: F1403, 7 Plumeria Drive, 7PD Street, Tathawade, Pune - 411033')
             self.set_font('Arial', '', 8)
             self.set_text_color(120, 120, 120)
             self.cell(0, 5, fa, 0, 1, 'C')
-
             self.set_font('Arial', '', 8)
             self.cell(0, 5, f'Page {self.page_no()}/{{nb}}', 0, 0, 'C')
             self.set_text_color(0, 0, 0)
-
+            
         def section_title(self, title):
             self.set_font('Arial', 'B', 12)
             self.set_fill_color(26, 58, 92)
