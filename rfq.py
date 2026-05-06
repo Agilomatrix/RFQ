@@ -462,25 +462,31 @@ def create_advanced_rfq_pdf(data):
 
         # ── RFQ No. in cover page footer area ─────────────────────────────────
         if rfq_no:
-            pdf.set_y(-45)
+            pdf.set_y(-30)
             pdf.set_draw_color(180, 180, 180)
             pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
             pdf.set_draw_color(0, 0, 0)
-            pdf.ln(2)
+            pdf.ln(1)
+            
+            rfq_no = data.get('rfq_no', '')
             pdf.set_font('Arial', 'B', 9)
             pdf.set_text_color(80, 80, 80)
-            pdf.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
+            if rfq_no:
+                pdf.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
             pdf.cell(0, 5, 'APL-Confidential', 0, 1, 'R')
             pdf.ln(1)
+            
             fn = data.get('footer_company_name', 'Agilomatrix Private Ltd')
             pdf.set_font('Arial', 'B', 13)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 6, fn, 0, 1, 'C')
+            
             fa = data.get('footer_company_address',
                           'Registered Office: F1403, 7 Plumeria Drive, 7PD Street, Tathawade, Pune - 411033')
             pdf.set_font('Arial', '', 8)
             pdf.set_text_color(120, 120, 120)
             pdf.cell(0, 5, fa, 0, 1, 'C')
+            
             pdf.set_font('Arial', '', 8)
             pdf.cell(0, 5, 'Page 1/{nb}', 0, 0, 'C')
             pdf.set_text_color(0, 0, 0)
