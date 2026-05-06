@@ -462,17 +462,18 @@ def create_advanced_rfq_pdf(data):
 
         # ── RFQ No. in cover page footer area ─────────────────────────────────
         if rfq_no:
-            pdf.set_y(-24)
+            footer_y = pdf.h - 38  # pdf.h is page height (297 for A4)
+            pdf.set_y(footer_y)
             pdf.set_draw_color(180, 180, 180)
             pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
             pdf.set_draw_color(0, 0, 0)
             pdf.ln(1)
             
-            rfq_no = data.get('rfq_no', '')
+            rfq_no_val = data.get('rfq_no', '')
             pdf.set_font('Arial', 'B', 9)
             pdf.set_text_color(80, 80, 80)
-            if rfq_no:
-                pdf.cell(0, 5, f'RFQ No.: {rfq_no}', 0, 0, 'L')
+            if rfq_no_val:
+                pdf.cell(0, 5, f'RFQ No.: {rfq_no_val}', 0, 0, 'L')
             pdf.cell(0, 5, 'APL-Confidential', 0, 1, 'R')
             pdf.ln(1)
             
@@ -490,7 +491,7 @@ def create_advanced_rfq_pdf(data):
             pdf.set_font('Arial', '', 8)
             pdf.cell(0, 5, 'Page 1/{nb}', 0, 0, 'C')
             pdf.set_text_color(0, 0, 0)
-
+            
     # ── MODEL DETAILS TABLE ───────────────────────────────────────────────────
     def render_model_details(pdf, df, subtitle=""):
         if df is None or df.empty:
